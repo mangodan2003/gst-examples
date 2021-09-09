@@ -5,3 +5,7 @@ executable('webrtc-recvonly-h264',
 executable('webrtc-unidirectional-h264',
            'webrtc-unidirectional-h264.c',
             dependencies : [gst_dep, gstsdp_dep, gstwebrtc_dep, libsoup_dep, json_glib_dep ])
+
+executable('webrtc-unidirectional-h264-datachannel',
+           'webrtc-unidirectional-h264-datachannel.c',
+            dependencies : [gst_dep, gstsdp_dep, gstwebrtc_dep, libsoup_dep, json_glib_dep ])

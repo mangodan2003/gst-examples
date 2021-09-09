@@ -1,0 +1,187 @@
+<html>
+  <head>
+    <script type="text/javascript" src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    <script type="text/javascript">
+      var html5VideoElement;
+      var websocketConnection;
+      var webrtcPeerConnection;
+      var webrtcConfiguration;
+      var reportError;
+      var sendChannel;
+      var makingOffer = false;
+      var polite = 0;// the c implementation is the polite side.
+
+      function onLocalDescription(desc) {
+        console.log("Local description: " + JSON.stringify(desc));
+        webrtcPeerConnection.setLocalDescription(desc).then(function() {
+          websocketConnection.send(JSON.stringify({ type: "sdp", "data": webrtcPeerConnection.localDescription }));
+        }).catch(reportError);
+      }
+
+      async function onIncomingSDP(sdp) {
+        console.log("Incoming SDP: " + JSON.stringify(sdp));
+        const offerCollision = (sdp.type == 'offer') && (makingOffer || webrtcPeerConnection.signalingState != 'stable');
+        const ignoreOffer = !polite && offerCollision;
+        if(ignoreOffer) { console.log('Ignoring offer'); return; };
+        await webrtcPeerConnection.setRemoteDescription(sdp);
+        if(sdp.type == 'offer') {
+          await webrtcPeerConnection.setLocalDescription();
+          websocketConnection.send(JSON.stringify({ "type": "sdp", "data": webrtcPeerConnection.localDescription }));
+        }
+      }
+
+      async function onIncomingICE(ice) {
+        console.log("Incoming ICE: " + JSON.stringify(ice));
+        await webrtcPeerConnection.addIceCandidate(ice);
+      }
+
+      function onAddRemoteStream(event) {
+        html5VideoElement.srcObject = event.streams[0];
+      }
+
+      function onIceCandidate(event) {
+        if (event.candidate == null)
+          return;
+        console.log("Sending ICE candidate out: " + JSON.stringify(event.candidate));
+        websocketConnection.send(JSON.stringify({ "type": "ice", "data": event.candidate }));
+      }
+
+      function sendMessage() {
+        var message = messageInputBox.value;
+        sendChannel.send(message);
+        messageInputBox.value = "";
+        messageInputBox.focus();
+      }
+
+      function handleSendChannelStatusChange(event) {
+        console.log('handleSendChannelStatusChange()', event);
+        if (sendChannel) {
+          var state = sendChannel.readyState;
+          if (state === "open") {
+            sendChannel.send('Chicken!');
+            messageInputBox.disabled = false;
+            messageInputBox.focus();
+            sendButton.disabled = false;
+          } else {
+            messageInputBox.disabled = true;
+            sendButton.disabled = true;
+          }
+        }
+      }
+
+      function handleReceiveMessage(event) {
+          console.log('handleReceiveMessage() :', event.data);
+        var el = document.createElement("p");
+        var txtNode = document.createTextNode(event.data);
+        el.appendChild(txtNode);
+        receiveBox.appendChild(el);
+      }
+
+      function handleOnDataChannel(){
+          console.log('handleOnDataChannel()');
+      }
+
+      function createDataChannel() {
+          console.log('Creating data channel');
+          sendChannel = webrtcPeerConnection.createDataChannel("sendChannel");
+          webrtcPeerConnection.ondatachannel = handleOnDataChannel;
+          sendChannel.onopen = handleSendChannelStatusChange;
+          sendChannel.onclose = handleSendChannelStatusChange;
+          sendChannel.onmessage = handleReceiveMessage;
+      }
+
+      function onServerMessage(event) {
+        var msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch (e) {
+          return;
+        }
+        console.log('onServerMessage() :', msg)
+
+        if (!webrtcPeerConnection) {
+          console.log('Creating RTCPeerConnection');
+          webrtcPeerConnection = new RTCPeerConnection(webrtcConfiguration);
+          webrtcPeerConnection.ontrack = onAddRemoteStream;
+          webrtcPeerConnection.onicecandidate = onIceCandidate;
+          webrtcPeerConnection.onnegotiationneeded = async () => {
+            try{
+              console.log('onnegotiationneeded.');
+              makingOffer = true;
+              await webrtcPeerConnection.setLocalDescription();
+              websocketConnection.send(JSON.stringify({ "type": "sdp", "data": webrtcPeerConnection.localDescription }));
+            } catch(err) {
+              console.error('Error : ', err);
+            } finally {
+              makingOffer = false;
+            }
+          };
+        }
+
+        try {
+            switch (msg.type) {
+            case "sdp": onIncomingSDP(msg.data); break;
+            case "ice": onIncomingICE(msg.data); break;
+            default: {
+                console.error('Unknown type!');
+                break;
+            }
+            }
+        } catch(e) {
+            console.error('Exception : ', e);
+        }
+      }
+
+      function playStream(videoElement, hostname, port, path, configuration, reportErrorCB) {
+        var l = window.location;
+        var wsHost = (hostname != undefined) ? hostname : l.hostname;
+        var wsPort = (port != undefined) ? port : l.port;
+        var wsPath = (path != undefined) ? path : "ws";
+        if (wsPort)
+          wsPort = ":" + wsPort;
+        var wsUrl = "ws://" + wsHost + wsPort + "/" + wsPath;
+
+        html5VideoElement = videoElement;
+        webrtcConfiguration = configuration;
+        reportError = (reportErrorCB != undefined) ? reportErrorCB : function(text) {};
+
+        websocketConnection = new WebSocket(wsUrl);
+        websocketConnection.addEventListener("message", onServerMessage);
+      }
+
+      window.onload = function() {
+        var vidstream = document.getElementById("stream");
+        var config = { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] };
+        connectButton = document.getElementById('connectButton');
+        sendButton = document.getElementById('sendButton');
+        messageInputBox = document.getElementById('message');
+        receiveBox = document.getElementById('receivebox');
+        sendButton.addEventListener('click', sendMessage, false);
+        connectButton.addEventListener('click', createDataChannel, false);
+        playStream(vidstream, null, null, null, config, function (errmsg) { console.error('Error : ', errmsg); });
+      };
+
+    </script>
+  </head>
+
+  <body>
+    <button id="connectButton" name="connectButton" class="buttonleft">
+    Connect
+    </button>
+    <div class="messagebox">
+      <label for="message">Enter a message:
+        <input type="text" name="message" id="message" placeholder="Message text"
+                inputmode="latin" size=60 maxlength=120 disabled>
+      </label>
+      <button id="sendButton" name="sendButton" class="buttonright" disabled>
+        Send
+      </button>
+    </div>
+    <div class="messagebox" id="receivebox">
+      <p>Messages received:</p>
+    </div>
+    <div>
+      <video id="stream" autoplay playsinline>Your browser does not support video</video>
+    </div>
+  </body>
+</html>
