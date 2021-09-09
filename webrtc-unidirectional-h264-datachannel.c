@@ -677,12 +677,10 @@ soup_websocket_closed_cb (SoupWebsocketConnection * connection,
     gpointer user_data)
 {
   GHashTable *receiver_entry_table = (GHashTable *) user_data;
-  ReceiverEntry *receiver_entry = (ReceiverEntry *) g_hash_table_lookup(receiver_entry_table, connection);
   g_hash_table_remove (receiver_entry_table, connection);
   gst_print ("Closed websocket connection %p\n", (gpointer) connection);
 
 
-  gst_element_set_state(receiver_entry->pipeline, GST_STATE_NULL);
 }
 
 
