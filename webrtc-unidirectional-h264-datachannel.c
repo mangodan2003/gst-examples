@@ -682,7 +682,7 @@ soup_websocket_closed_cb (SoupWebsocketConnection * connection,
   gst_print ("Closed websocket connection %p\n", (gpointer) connection);
 
 
-  gst_element_set_state(receiver_entry->webrtcbin, GST_STATE_NULL);
+  gst_element_set_state(receiver_entry->pipeline, GST_STATE_NULL);
 }
 
 
